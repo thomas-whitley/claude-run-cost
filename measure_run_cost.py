@@ -83,12 +83,23 @@ def fmt(n):
     return "%.1fM" % (n / 1e6) if n >= 1e6 else "%.0fK" % (n / 1e3)
 
 
+def parse_rates(s):
+    try:
+        parts = [float(x) for x in s.split(",")]
+    except ValueError:
+        raise argparse.ArgumentTypeError("rates must be four comma-separated numbers")
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError("rates must be four comma-separated numbers")
+    return parts
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--project", default=".", help="repo path (default: current directory)")
     ap.add_argument("--days", type=int, default=1, help="sessions modified in the last N days (default 1)")
     ap.add_argument("--session", help="session id prefix; overrides --days")
     ap.add_argument("--budget", type=int, default=0, help="tokens; exit 2 if the total is over")
+    ap.add_argument("--rates", type=parse_rates, help="four comma-separated numbers: dollars per million tokens for input, cache creation, cache read, output")
     a = ap.parse_args()
 
     proj = project_dir(a.project)
@@ -114,12 +125,20 @@ def main():
         return 1
 
     grand = 0
+    sum_inp = 0
+    sum_create = 0
+    sum_read = 0
+    sum_out = 0
     rows = []
     for s in sessions:
         sid = os.path.basename(s)[:-6]
         t = totals(s)
         tot = t["input"] + t["out"] + t["create"] + t["read"]
         grand += tot
+        sum_inp += t["input"]
+        sum_create += t["create"]
+        sum_read += t["read"]
+        sum_out += t["out"]
         rows.append(("main  " + sid[:8], t, tot))
         for sub in sorted(glob.glob(os.path.join(proj, sid, "subagents", "agent-*.jsonl"))):
             aid = os.path.basename(sub)[6:-6]
@@ -135,6 +154,10 @@ def main():
             st = totals(sub)
             stot = st["input"] + st["out"] + st["create"] + st["read"]
             grand += stot
+            sum_inp += st["input"]
+            sum_create += st["create"]
+            sum_read += st["read"]
+            sum_out += st["out"]
             rows.append(("  " * depth + "agent " + (desc or aid)[:34], st, stot))
 
     print()
@@ -157,6 +180,9 @@ def main():
         print("RUN COST: %s   budget %s   %s" % (fmt(grand), fmt(a.budget), verdict))
     else:
         print("RUN COST: %s" % fmt(grand))
+    if a.rates:
+        cost = (sum_inp * a.rates[0] + sum_create * a.rates[1] + sum_read * a.rates[2] + sum_out * a.rates[3]) / 1_000_000
+        print("EST COST: $%.2f" % cost)
     print()
     print("!turns: an agent with no scope limit. !ctx: a saturated context re-read on every turn.")
     print("!fanout: an agent that spawned its own agents; their cost is listed indented beneath it.")
