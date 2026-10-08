@@ -83,6 +83,33 @@ def fmt(n):
     return "%.1fM" % (n / 1e6) if n >= 1e6 else "%.0fK" % (n / 1e3)
 
 
+def flags(t):
+    res = []
+    if t["msgs"] > TURNS_FLAG:
+        res.append(("turns", None))
+    if t["maxctx"] > CTX_FLAG:
+        res.append(("ctx", None))
+    if t["tools"].get("Agent"):
+        res.append(("fanout", t["tools"]["Agent"]))
+    return res
+
+
+def json_row(label, depth, t, tot):
+    return {
+        "label": label,
+        "depth": depth,
+        "total": tot,
+        "input": t["input"],
+        "create": t["create"],
+        "read": t["read"],
+        "output": t["out"],
+        "msgs": t["msgs"],
+        "maxctx": t["maxctx"],
+        "fetches": t["tools"].get("WebFetch", 0) + t["tools"].get("WebSearch", 0),
+        "flags": [name for name, _ in flags(t)],
+    }
+
+
 def parse_rates(s):
     try:
         parts = [float(x) for x in s.split(",")]
@@ -106,12 +133,11 @@ def main():
     proj = project_dir(a.project)
     if not os.path.isdir(proj):
         root = os.path.dirname(proj)
-        if not a.json:
-            print("no transcripts at %s" % proj, file=sys.stderr)
-            if os.path.isdir(root):
-                print("projects with transcripts:", file=sys.stderr)
-                for d in sorted(os.listdir(root)):
-                    print("  " + d, file=sys.stderr)
+        print("no transcripts at %s" % proj, file=sys.stderr)
+        if os.path.isdir(root):
+            print("projects with transcripts:", file=sys.stderr)
+            for d in sorted(os.listdir(root)):
+                print("  " + d, file=sys.stderr)
         return 1
 
     cutoff = datetime.now() - timedelta(days=a.days)
@@ -146,26 +172,7 @@ def main():
         label = "main  " + sid[:8]
         rows.append((label, t, tot))
 
-        flags = []
-        if t["msgs"] > TURNS_FLAG:
-            flags.append("turns")
-        if t["maxctx"] > CTX_FLAG:
-            flags.append("ctx")
-        if t["tools"].get("Agent"):
-            flags.append("fanout")
-        json_rows.append({
-            "label": label.lstrip(),
-            "depth": 0,
-            "total": tot,
-            "input": t["input"],
-            "create": t["create"],
-            "read": t["read"],
-            "output": t["out"],
-            "msgs": t["msgs"],
-            "maxctx": t["maxctx"],
-            "fetches": t["tools"].get("WebFetch", 0) + t["tools"].get("WebSearch", 0),
-            "flags": flags,
-        })
+        json_rows.append(json_row(label.lstrip(), 0, t, tot))
 
         for sub in sorted(glob.glob(os.path.join(proj, sid, "subagents", "agent-*.jsonl"))):
             aid = os.path.basename(sub)[6:-6]
@@ -189,26 +196,7 @@ def main():
             sub_label = "  " * depth + "agent " + raw_label
             rows.append((sub_label, st, stot))
 
-            sub_flags = []
-            if st["msgs"] > TURNS_FLAG:
-                sub_flags.append("turns")
-            if st["maxctx"] > CTX_FLAG:
-                sub_flags.append("ctx")
-            if st["tools"].get("Agent"):
-                sub_flags.append("fanout")
-            json_rows.append({
-                "label": ("agent " + raw_label),
-                "depth": depth,
-                "total": stot,
-                "input": st["input"],
-                "create": st["create"],
-                "read": st["read"],
-                "output": st["out"],
-                "msgs": st["msgs"],
-                "maxctx": st["maxctx"],
-                "fetches": st["tools"].get("WebFetch", 0) + st["tools"].get("WebSearch", 0),
-                "flags": sub_flags,
-            })
+            json_rows.append(json_row("agent " + raw_label, depth, st, stot))
 
     if a.json:
         print(json.dumps({"run_cost": grand, "rows": json_rows}))
@@ -220,14 +208,13 @@ def main():
             fetches = t["tools"].get("WebFetch", 0) + t["tools"].get("WebSearch", 0)
             c_pct = "%d%%" % round(t["read"] * 100 / tot) if tot > 0 else "0%"
             flag = ""
-            if t["msgs"] > TURNS_FLAG:
-                flag += " !turns"
-            if t["maxctx"] > CTX_FLAG:
-                flag += " !ctx"
-            if t["tools"].get("Agent"):
-                flag += " !fanout(%d)" % t["tools"]["Agent"]
+            for name, n_val in flags(t):
+                if name == "fanout":
+                    flag += " !fanout(%d)" % n_val
+                else:
+                    flag += " !%s" % name
             print("%-44s %8s %7d %7s %8s %7s %8d%s"
-                  % (label[:44], fmt(tot), t["msgs"], fmt(t["maxctx"],), fmt(t["out"],), c_pct, fetches, flag))
+                  % (label[:44], fmt(tot), t["msgs"], fmt(t["maxctx"]), fmt(t["out"]), c_pct, fetches, flag))
         print("-" * 96)
         if a.budget:
             verdict = "OVER by %s" % fmt(grand - a.budget) if grand > a.budget else "within budget"
