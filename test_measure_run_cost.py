@@ -63,7 +63,7 @@ class ProjectDir(Home):
 
     def test_separators_and_colons_become_dashes(self):
         name = os.path.basename(self.proj)
-        for ch in ":\\/":
+        for ch in ":/" + os.sep:
             self.assertNotIn(ch, name)
         self.assertTrue(name.endswith("-repo"))
 

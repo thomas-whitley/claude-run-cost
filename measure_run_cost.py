@@ -40,8 +40,9 @@ CTX_FLAG = 150_000
 
 def project_dir(path):
     """Claude Code names the transcript folder after the absolute path with ':' and
-    separators replaced by '-': C:\\Users\\me\\repo -> C--Users-me-repo, /home/me/repo -> -home-me-repo."""
-    enc = re.sub(r"[:\\/]", "-", os.path.abspath(path))
+    separators replaced by '-': C:/Users/me/repo on Windows -> C--Users-me-repo,
+    /home/me/repo -> -home-me-repo."""
+    enc = re.sub("[:/]", "-", os.path.abspath(path).replace(os.sep, "/"))
     return os.path.join(os.path.expanduser("~"), ".claude", "projects", enc)
 
 
