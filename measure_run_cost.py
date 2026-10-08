@@ -48,7 +48,7 @@ def project_dir(path):
 
 def totals(path):
     """Sum the usage blocks in one transcript."""
-    out = cre = red = mx = n = 0
+    inp = out = cre = red = mx = n = 0
     tools = collections.Counter()
     first = last = None
     with open(path, encoding="utf-8") as f:
@@ -65,6 +65,7 @@ def totals(path):
             m = d.get("message") or {}
             u = m.get("usage")
             if u:
+                inp += u.get("input_tokens", 0)
                 out += u.get("output_tokens", 0)
                 cre += u.get("cache_creation_input_tokens", 0)
                 red += u.get("cache_read_input_tokens", 0)
@@ -75,7 +76,7 @@ def totals(path):
                 for b in c:
                     if isinstance(b, dict) and b.get("type") == "tool_use":
                         tools[b.get("name", "?")] += 1
-    return dict(out=out, create=cre, read=red, maxctx=mx, msgs=n, tools=tools, first=first, last=last)
+    return dict(input=inp, out=out, create=cre, read=red, maxctx=mx, msgs=n, tools=tools, first=first, last=last)
 
 
 def fmt(n):
@@ -117,7 +118,7 @@ def main():
     for s in sessions:
         sid = os.path.basename(s)[:-6]
         t = totals(s)
-        tot = t["out"] + t["create"] + t["read"]
+        tot = t["input"] + t["out"] + t["create"] + t["read"]
         grand += tot
         rows.append(("main  " + sid[:8], t, tot))
         for sub in sorted(glob.glob(os.path.join(proj, sid, "subagents", "agent-*.jsonl"))):
@@ -132,7 +133,7 @@ def main():
                 except (ValueError, OSError):
                     pass
             st = totals(sub)
-            stot = st["out"] + st["create"] + st["read"]
+            stot = st["input"] + st["out"] + st["create"] + st["read"]
             grand += stot
             rows.append(("  " * depth + "agent " + (desc or aid)[:34], st, stot))
 
