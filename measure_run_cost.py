@@ -100,16 +100,18 @@ def main():
     ap.add_argument("--session", help="session id prefix; overrides --days")
     ap.add_argument("--budget", type=int, default=0, help="tokens; exit 2 if the total is over")
     ap.add_argument("--rates", type=parse_rates, help="four comma-separated numbers: dollars per million tokens for input, cache creation, cache read, output")
+    ap.add_argument("--json", action="store_true", help="print output as a JSON object")
     a = ap.parse_args()
 
     proj = project_dir(a.project)
     if not os.path.isdir(proj):
         root = os.path.dirname(proj)
-        print("no transcripts at %s" % proj, file=sys.stderr)
-        if os.path.isdir(root):
-            print("projects with transcripts:", file=sys.stderr)
-            for d in sorted(os.listdir(root)):
-                print("  " + d, file=sys.stderr)
+        if not a.json:
+            print("no transcripts at %s" % proj, file=sys.stderr)
+            if os.path.isdir(root):
+                print("projects with transcripts:", file=sys.stderr)
+                for d in sorted(os.listdir(root)):
+                    print("  " + d, file=sys.stderr)
         return 1
 
     cutoff = datetime.now() - timedelta(days=a.days)
@@ -121,7 +123,8 @@ def main():
         elif datetime.fromtimestamp(os.path.getmtime(p)) >= cutoff:
             sessions.append(p)
     if not sessions:
-        print("no sessions in the last %d day(s) under %s" % (a.days, proj))
+        if not a.json:
+            print("no sessions in the last %d day(s) under %s" % (a.days, proj))
         return 1
 
     grand = 0
@@ -130,6 +133,7 @@ def main():
     sum_read = 0
     sum_out = 0
     rows = []
+    json_rows = []
     for s in sessions:
         sid = os.path.basename(s)[:-6]
         t = totals(s)
@@ -139,7 +143,30 @@ def main():
         sum_create += t["create"]
         sum_read += t["read"]
         sum_out += t["out"]
-        rows.append(("main  " + sid[:8], t, tot))
+        label = "main  " + sid[:8]
+        rows.append((label, t, tot))
+
+        flags = []
+        if t["msgs"] > TURNS_FLAG:
+            flags.append("turns")
+        if t["maxctx"] > CTX_FLAG:
+            flags.append("ctx")
+        if t["tools"].get("Agent"):
+            flags.append("fanout")
+        json_rows.append({
+            "label": label.lstrip(),
+            "depth": 0,
+            "total": tot,
+            "input": t["input"],
+            "create": t["create"],
+            "read": t["read"],
+            "output": t["out"],
+            "msgs": t["msgs"],
+            "maxctx": t["maxctx"],
+            "fetches": t["tools"].get("WebFetch", 0) + t["tools"].get("WebSearch", 0),
+            "flags": flags,
+        })
+
         for sub in sorted(glob.glob(os.path.join(proj, sid, "subagents", "agent-*.jsonl"))):
             aid = os.path.basename(sub)[6:-6]
             meta_p = sub[:-6] + ".meta.json"
@@ -158,36 +185,62 @@ def main():
             sum_create += st["create"]
             sum_read += st["read"]
             sum_out += st["out"]
-            rows.append(("  " * depth + "agent " + (desc or aid)[:34], st, stot))
+            raw_label = (desc or aid)[:34]
+            sub_label = "  " * depth + "agent " + raw_label
+            rows.append((sub_label, st, stot))
 
-    print()
-    print("%-44s %8s %7s %7s %8s %7s %8s" % ("", "TOTAL", "msgs", "maxctx", "output", "cache%", "fetches"))
-    print("-" * 96)
-    for label, t, tot in rows:
-        fetches = t["tools"].get("WebFetch", 0) + t["tools"].get("WebSearch", 0)
-        c_pct = "%d%%" % round(t["read"] * 100 / tot) if tot > 0 else "0%"
-        flag = ""
-        if t["msgs"] > TURNS_FLAG:
-            flag += " !turns"
-        if t["maxctx"] > CTX_FLAG:
-            flag += " !ctx"
-        if t["tools"].get("Agent"):
-            flag += " !fanout(%d)" % t["tools"]["Agent"]
-        print("%-44s %8s %7d %7s %8s %7s %8d%s"
-              % (label[:44], fmt(tot), t["msgs"], fmt(t["maxctx"],), fmt(t["out"],), c_pct, fetches, flag))
-    print("-" * 96)
-    if a.budget:
-        verdict = "OVER by %s" % fmt(grand - a.budget) if grand > a.budget else "within budget"
-        print("RUN COST: %s   budget %s   %s" % (fmt(grand), fmt(a.budget), verdict))
+            sub_flags = []
+            if st["msgs"] > TURNS_FLAG:
+                sub_flags.append("turns")
+            if st["maxctx"] > CTX_FLAG:
+                sub_flags.append("ctx")
+            if st["tools"].get("Agent"):
+                sub_flags.append("fanout")
+            json_rows.append({
+                "label": ("agent " + raw_label),
+                "depth": depth,
+                "total": stot,
+                "input": st["input"],
+                "create": st["create"],
+                "read": st["read"],
+                "output": st["out"],
+                "msgs": st["msgs"],
+                "maxctx": st["maxctx"],
+                "fetches": st["tools"].get("WebFetch", 0) + st["tools"].get("WebSearch", 0),
+                "flags": sub_flags,
+            })
+
+    if a.json:
+        print(json.dumps({"run_cost": grand, "rows": json_rows}))
     else:
-        print("RUN COST: %s" % fmt(grand))
-    if a.rates:
-        cost = (sum_inp * a.rates[0] + sum_create * a.rates[1] + sum_read * a.rates[2] + sum_out * a.rates[3]) / 1_000_000
-        print("EST COST: $%.2f" % cost)
-    print()
-    print("!turns: an agent with no scope limit. !ctx: a saturated context re-read on every turn.")
-    print("!fanout: an agent that spawned its own agents; their cost is listed indented beneath it.")
-    print("cache%: share of TOTAL that was re-reading cached context; high means the agent mostly re-read.")
+        print()
+        print("%-44s %8s %7s %7s %8s %7s %8s" % ("", "TOTAL", "msgs", "maxctx", "output", "cache%", "fetches"))
+        print("-" * 96)
+        for label, t, tot in rows:
+            fetches = t["tools"].get("WebFetch", 0) + t["tools"].get("WebSearch", 0)
+            c_pct = "%d%%" % round(t["read"] * 100 / tot) if tot > 0 else "0%"
+            flag = ""
+            if t["msgs"] > TURNS_FLAG:
+                flag += " !turns"
+            if t["maxctx"] > CTX_FLAG:
+                flag += " !ctx"
+            if t["tools"].get("Agent"):
+                flag += " !fanout(%d)" % t["tools"]["Agent"]
+            print("%-44s %8s %7d %7s %8s %7s %8d%s"
+                  % (label[:44], fmt(tot), t["msgs"], fmt(t["maxctx"],), fmt(t["out"],), c_pct, fetches, flag))
+        print("-" * 96)
+        if a.budget:
+            verdict = "OVER by %s" % fmt(grand - a.budget) if grand > a.budget else "within budget"
+            print("RUN COST: %s   budget %s   %s" % (fmt(grand), fmt(a.budget), verdict))
+        else:
+            print("RUN COST: %s" % fmt(grand))
+        if a.rates:
+            cost = (sum_inp * a.rates[0] + sum_create * a.rates[1] + sum_read * a.rates[2] + sum_out * a.rates[3]) / 1_000_000
+            print("EST COST: $%.2f" % cost)
+        print()
+        print("!turns: an agent with no scope limit. !ctx: a saturated context re-read on every turn.")
+        print("!fanout: an agent that spawned its own agents; their cost is listed indented beneath it.")
+        print("cache%: share of TOTAL that was re-reading cached context; high means the agent mostly re-read.")
     return 2 if a.budget and grand > a.budget else 0
 
 
