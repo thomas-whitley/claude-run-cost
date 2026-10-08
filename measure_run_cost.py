@@ -161,10 +161,11 @@ def main():
             rows.append(("  " * depth + "agent " + (desc or aid)[:34], st, stot))
 
     print()
-    print("%-44s %8s %7s %7s %8s %8s" % ("", "TOTAL", "msgs", "maxctx", "output", "fetches"))
-    print("-" * 88)
+    print("%-44s %8s %7s %7s %8s %7s %8s" % ("", "TOTAL", "msgs", "maxctx", "output", "cache%", "fetches"))
+    print("-" * 96)
     for label, t, tot in rows:
         fetches = t["tools"].get("WebFetch", 0) + t["tools"].get("WebSearch", 0)
+        c_pct = "%d%%" % round(t["read"] * 100 / tot) if tot > 0 else "0%"
         flag = ""
         if t["msgs"] > TURNS_FLAG:
             flag += " !turns"
@@ -172,9 +173,9 @@ def main():
             flag += " !ctx"
         if t["tools"].get("Agent"):
             flag += " !fanout(%d)" % t["tools"]["Agent"]
-        print("%-44s %8s %7d %7s %8s %8d%s"
-              % (label[:44], fmt(tot), t["msgs"], fmt(t["maxctx"]), fmt(t["out"]), fetches, flag))
-    print("-" * 88)
+        print("%-44s %8s %7d %7s %8s %7s %8d%s"
+              % (label[:44], fmt(tot), t["msgs"], fmt(t["maxctx"],), fmt(t["out"],), c_pct, fetches, flag))
+    print("-" * 96)
     if a.budget:
         verdict = "OVER by %s" % fmt(grand - a.budget) if grand > a.budget else "within budget"
         print("RUN COST: %s   budget %s   %s" % (fmt(grand), fmt(a.budget), verdict))
@@ -186,6 +187,7 @@ def main():
     print()
     print("!turns: an agent with no scope limit. !ctx: a saturated context re-read on every turn.")
     print("!fanout: an agent that spawned its own agents; their cost is listed indented beneath it.")
+    print("cache%: share of TOTAL that was re-reading cached context; high means the agent mostly re-read.")
     return 2 if a.budget and grand > a.budget else 0
 
 
