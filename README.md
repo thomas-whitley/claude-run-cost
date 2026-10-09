@@ -42,6 +42,7 @@ python measure_run_cost.py --days 3
 python measure_run_cost.py --session 2ca32e43      # one session, by id prefix
 python measure_run_cost.py --project ~/src/thing   # another project
 python measure_run_cost.py --budget 15000000       # exit code 2 if over, for a CI or a hook
+python measure_run_cost.py --top 10              # show only the N most expensive rows
 ```
 
 Python 3.8 or later, standard library only.
