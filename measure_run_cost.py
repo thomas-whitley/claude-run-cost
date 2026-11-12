@@ -126,6 +126,7 @@ def main():
     ap.add_argument("--days", type=int, default=1, help="sessions modified in the last N days (default 1)")
     ap.add_argument("--session", help="session id prefix; overrides --days")
     ap.add_argument("--budget", type=int, default=0, help="tokens; exit 2 if the total is over")
+    ap.add_argument("--top", type=int, default=0, help="show only the N most expensive rows (default: all)")
     ap.add_argument("--rates", type=parse_rates, help="four comma-separated numbers: dollars per million tokens for input, cache creation, cache read, output")
     ap.add_argument("--json", action="store_true", help="print output as a JSON object")
     a = ap.parse_args()
@@ -204,6 +205,11 @@ def main():
         print()
         print("%-44s %8s %7s %7s %8s %7s %8s" % ("", "TOTAL", "msgs", "maxctx", "output", "cache%", "fetches"))
         print("-" * 96)
+        hidden = 0
+        if a.top > 0 and len(rows) > a.top:
+            rows.sort(key=lambda x: x[2], reverse=True)
+            hidden = len(rows) - a.top
+            rows = rows[:a.top]
         for label, t, tot in rows:
             fetches = t["tools"].get("WebFetch", 0) + t["tools"].get("WebSearch", 0)
             c_pct = "%d%%" % round(t["read"] * 100 / tot) if tot > 0 else "0%"
@@ -216,6 +222,8 @@ def main():
             print("%-44s %8s %7d %7s %8s %7s %8d%s"
                   % (label[:44], fmt(tot), t["msgs"], fmt(t["maxctx"]), fmt(t["out"]), c_pct, fetches, flag))
         print("-" * 96)
+        if hidden > 0:
+            print("(%d more rows hidden by --top)" % hidden)
         if a.budget:
             verdict = "OVER by %s" % fmt(grand - a.budget) if grand > a.budget else "within budget"
             print("RUN COST: %s   budget %s   %s" % (fmt(grand), fmt(a.budget), verdict))
